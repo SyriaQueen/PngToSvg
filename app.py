@@ -2,47 +2,53 @@ import io
 import os
 import tempfile
 import subprocess 
-import zipfile # لاستيراد مكتبة الـ ZIP
+import zipfile
 from flask import Flask, request, send_file, render_template
 from PIL import Image
 
 app = Flask(__name__)
 
 # --- دالة مساعدة لمعالجة صورة واحدة ---
-# هذه الدالة تحتوي على كل المنطق الذي كان في دالة convert_image سابقاً
-# ولكنها الآن تُرجع المخزن المؤقت (buffer) بدلاً من استجابة Flask
 def process_image(image_file, output_format):
     image_file.seek(0)
     
-    # --- معالجة SVG (Potrace) ---
+    # --- معالجة SVG (التركيز على الشفافية) ---
     if output_format == 'svg':
-        temp_input_path = None
-        temp_output_path = None
+        
+        # 1. التحقق من صيغة الملف والشفافية
         try:
             img = Image.open(image_file)
+        except Exception:
+            raise Exception("الملف المدخل ليس صورة صالحة.")
             
-            # 1. المعالجة الذكية للشفافية والألوان (الحل الصحيح)
-            if img.mode in ('RGBA', 'LA'):
-                img_bw = Image.new('L', img.size, 255)
-                black_fill = Image.new('L', img.size, 0)
-                alpha_mask = img.split()[-1]
-                img_bw.paste(black_fill, mask=alpha_mask)
-            else:
-                img_bw = img.convert('L')
-                img_bw = img_bw.point(lambda p: 0 if p < 128 else 255, '1') 
+        # التحقق من أن الملف PNG ولديه قناة ألفا (RGBA)
+        if img.format != 'PNG' or img.mode != 'RGBA':
+            raise Exception("الرجاء اختيار صورة PNG شفافة فقط للتحويل إلى SVG.")
+        
+        temp_input_path = None
+        temp_output_path = None
+        
+        try:
+            # 2. استخراج قناة ألفا (القناة المسؤولة عن الشفافية)
+            # هذه هي القناة التي تحدد حدود الكائن (غير الشفاف)
+            alpha_mask = img.split()[3]
+            
+            # 3. تحويل قناع ألفا إلى صورة ثنائية (أسود وأبيض) لـ Potrace
+            # حيث يكون الكائن غير الشفاف أسود، والخلفية الشفافة أبيض
+            img_bw = alpha_mask.point(lambda p: 0 if p > 0 else 255, '1')
 
-            # 2. حفظ الصورة النقطية الثنائية مؤقتاً
+            # 4. حفظ الصورة النقطية الثنائية مؤقتاً
             with tempfile.NamedTemporaryFile(suffix='.bmp', delete=False) as temp_input:
                 img_bw.save(temp_input, format='BMP') 
                 temp_input_path = temp_input.name
                 
             temp_output_path = temp_input_path.replace('.bmp', '.svg')
 
-            # 3. تنفيذ أمر Potrace
+            # 5. تنفيذ أمر Potrace
             command = ['potrace', '-s', temp_input_path, '-o', temp_output_path]
             subprocess.run(command, check=True, capture_output=True, text=True)
             
-            # 4. قراءة ملف SVG وإرساله
+            # 6. قراءة ملف SVG وإرجاع المخزن المؤقت
             with open(temp_output_path, 'rb') as svg_file:
                 buffer = io.BytesIO(svg_file.read())
             return buffer
@@ -50,34 +56,20 @@ def process_image(image_file, output_format):
         except subprocess.CalledProcessError as e:
             raise Exception(f'فشل Potrace في التحويل: {e.stderr}')
         except FileNotFoundError:
-            raise Exception('خطأ: أداة Potrace غير مثبتة. (على Termux: pkg install potrace)')
+            raise Exception('خطأ: أداة Potrace غير مثبتة.')
         except Exception as e:
             raise Exception(f'فشل عام في معالجة SVG: {e}')
         finally:
-            # 5. تنظيف الملفات المؤقتة
+            # 7. تنظيف الملفات المؤقتة
             if temp_input_path and os.path.exists(temp_input_path):
                 os.remove(temp_input_path)
             if temp_output_path and os.path.exists(temp_output_path):
                 os.remove(temp_output_path)
     
-    # --- معالجة الصيغ النقطية الأخرى (PIL) ---
+    # --- تعطيل الصيغ النقطية الأخرى ---
     else:
-        try:
-            img = Image.open(image_file)
-            
-            if output_format in ['jpeg', 'jpg'] and img.mode == 'RGBA':
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                background.paste(img, mask=img.split()[3])
-                img = background
-            
-            buffer = io.BytesIO()
-            save_format = 'jpeg' if output_format == 'jpg' else output_format
-            
-            img.save(buffer, format=save_format)
-            buffer.seek(0)
-            return buffer
-        except Exception as e:
-            raise Exception(f'فشل في تحويل الصورة النقطية: {e}')
+        # لن يتم الوصول إلى هنا إلا إذا تم تغيير قيمة 'format-select' في الواجهة
+        raise Exception("هذا التطبيق يدعم فقط التحويل إلى SVG من PNG شفافة.")
 
 
 @app.route('/')
@@ -88,7 +80,8 @@ def index():
 def convert_image_route():
     # استخدام getlist للحصول على كل الملفات
     image_files = request.files.getlist('image')
-    output_format = request.form.get('format', 'png').lower()
+    # يجب تثبيت الإخراج على 'svg' بغض النظر عما يختاره المستخدم للتركيز على الوظيفة المطلوبة
+    output_format = 'svg'
 
     if not image_files or not image_files[0].filename:
         return 'لم يتم تحميل أي ملفات.', 400
@@ -97,14 +90,13 @@ def convert_image_route():
     if len(image_files) == 1:
         try:
             image_file = image_files[0]
-            # الترقيم يبدأ من 01
-            download_name = f"01.{output_format}"
+            download_name = f"converted-01.{output_format}"
             
             buffer = process_image(image_file, output_format)
             
             return send_file(
                 buffer,
-                mimetype=f'image/{output_format}',
+                mimetype='image/svg+xml', # MIME Type الصحيح لـ SVG
                 as_attachment=True,
                 download_name=download_name
             )
@@ -113,26 +105,19 @@ def convert_image_route():
 
     # --- معالجة أكثر من ملف (إنشاء ZIP) ---
     else:
-        # إنشاء ملف ZIP في الذاكرة
         zip_buffer = io.BytesIO()
         
-        # 'w' = وضع الكتابة
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # التكرار على الملفات مع عداد مرقم
             for index, image_file in enumerate(image_files):
-                # الترقيم: 01, 02, 03, ...
                 filename = f"{str(index + 1).zfill(2)}.{output_format}"
                 
                 try:
-                    # تحويل الصورة
                     converted_buffer = process_image(image_file, output_format)
-                    
-                    # كتابة بيانات الصورة المحولة إلى ملف ZIP
                     zip_file.writestr(filename, converted_buffer.getvalue())
                 except Exception as e:
-                    # إذا فشل ملف واحد، يمكننا تسجيل الخطأ والمتابعة
                     print(f"فشل تحويل الملف {image_file.filename}: {e}")
-                    # يمكنك إضافة رسالة خطأ للمستخدم هنا إذا أردت
+                    # يمكن إضافة ملف نصي إلى ZIP يوضح الملفات التي فشلت
+                    zip_file.writestr(f"error_{str(index + 1).zfill(2)}.txt", str(e))
                     
         zip_buffer.seek(0)
         
@@ -140,8 +125,5 @@ def convert_image_route():
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
-            download_name='converted_images.zip'
+            download_name='converted_svgs.zip'
         )
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
