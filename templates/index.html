@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>أداة تحويل الصور</title>
+    <title>أداة تحويل PNG الشفاف إلى SVG</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -56,19 +56,14 @@
 <body>
 
 <div class="container">
-    <h1>أداة تحويل الصور</h1>
+    <h1>أداة تحويل PNG الشفاف إلى SVG</h1>
     <form id="convert-form">
-        <input type="file" id="image-input" name="image" accept="image/*" required multiple>
+        <input type="file" id="image-input" name="image" accept="image/png" required multiple>
         
-        <select id="format-select" name="format">
-            <option value="png">PNG</option>
-            <option value="jpeg">JPEG</option>
-            <option value="webp">WebP</option>
-            <option value="gif">GIF</option>
-            <option value="tiff">TIFF</option>
-            <option value="svg">SVG (تحويل متجه)</option> 
+        <select id="format-select" name="format" disabled>
+            <option value="svg">SVG (شفاف)</option> 
         </select>
-        <button type="submit">تحويل وتحميل</button>
+        <button type="submit">تحويل وتحميل SVG</button>
     </form>
     <div id="status-message"></div>
 </div>
@@ -83,16 +78,22 @@
 
         const files = fileInput.files;
         if (!files.length) {
-            statusMessage.textContent = 'الرجاء اختيار صورة واحدة أو أكثر أولاً.';
+            statusMessage.textContent = 'الرجاء اختيار صورة PNG شفافة واحدة أو أكثر.';
             statusMessage.style.color = 'red';
             return;
         }
 
-        // تحديث رسالة الحالة لتعكس عدد الملفات
         statusMessage.textContent = `يتم تحويل ${files.length} ملف...`;
         statusMessage.style.color = '#007bff';
 
-        const formData = new FormData(form);
+        const formData = new FormData();
+        
+        // يجب إضافة الملفات يدوياً لأن <select> معطل
+        for (let i = 0; i < files.length; i++) {
+            formData.append('image', files[i]);
+        }
+        // إضافة صيغة التحويل المطلوبة (SVG)
+        formData.append('format', 'svg'); 
 
         try {
             const response = await fetch('/convert', {
@@ -110,9 +111,8 @@
             const a = document.createElement('a');
             a.href = url;
             
-            // هذا الكود سيعمل مع الملف الفردي أو الـ ZIP
-            // لأنه يقرأ اسم الملف من الـ Header
-            let filename = 'converted_images.zip'; // اسم افتراضي
+            let filename = 'converted_svgs.zip'; 
+            
             const contentDisposition = response.headers.get('content-disposition');
             if (contentDisposition) {
                 const match = contentDisposition.match(/filename="?(.+?)"?$/);
