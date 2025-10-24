@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>أداة تحويل الصور</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f4f4f4;
+            margin: 0;
+            text-align: center;
+        }
+        .container {
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            align-items: center;
+        }
+        input[type="file"], select, button {
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #status-message {
+            margin-top: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>أداة تحويل الصور</h1>
+    <form id="convert-form">
+        <input type="file" id="image-input" name="image" accept="image/*" required multiple>
+        
+        <select id="format-select" name="format">
+            <option value="png">PNG</option>
+            <option value="jpeg">JPEG</option>
+            <option value="webp">WebP</option>
+            <option value="gif">GIF</option>
+            <option value="tiff">TIFF</option>
+            <option value="svg">SVG (تحويل متجه)</option> 
+        </select>
+        <button type="submit">تحويل وتحميل</button>
+    </form>
+    <div id="status-message"></div>
+</div>
+
+<script>
+    const form = document.getElementById('convert-form');
+    const statusMessage = document.getElementById('status-message');
+    const fileInput = document.getElementById('image-input');
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const files = fileInput.files;
+        if (!files.length) {
+            statusMessage.textContent = 'الرجاء اختيار صورة واحدة أو أكثر أولاً.';
+            statusMessage.style.color = 'red';
+            return;
+        }
+
+        // تحديث رسالة الحالة لتعكس عدد الملفات
+        statusMessage.textContent = `يتم تحويل ${files.length} ملف...`;
+        statusMessage.style.color = '#007bff';
+
+        const formData = new FormData(form);
+
+        try {
+            const response = await fetch('/convert', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'فشل في التحويل');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            // هذا الكود سيعمل مع الملف الفردي أو الـ ZIP
+            // لأنه يقرأ اسم الملف من الـ Header
+            let filename = 'converted_images.zip'; // اسم افتراضي
+            const contentDisposition = response.headers.get('content-disposition');
+            if (contentDisposition) {
+                const match = contentDisposition.match(/filename="?(.+?)"?$/);
+                if (match) {
+                    filename = match[1];
+                }
+            }
+
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+            statusMessage.textContent = 'تم التحويل والتحميل بنجاح!';
+            statusMessage.style.color = 'green';
+
+        } catch (error) {
+            statusMessage.textContent = `خطأ: ${error.message}`;
+            statusMessage.style.color = 'red';
+            console.error(error);
+        }
+    });
+</script>
+
+</body>
+</html>
